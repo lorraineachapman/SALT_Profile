@@ -27,6 +27,6 @@ For example:
 
     ecl bundle install https://github.com/leonarta/SALT_Profile.git
 
-For more information about the bundle commands in the ecl command line tool, see the `HPCC Client Tools Manual`_
+For more information about the bundle commands in the ecl command line tool, see the `HPCC Client Tools Manual`.
 
-For more information about how to create an Ecl bundle, see the [https://github.com/hpcc-systems/HPCC-Platform/blob/master/ecl/ecl-bundle/BUNDLES.rst](ECL Bundle Writer's Guide).
+For more information about how to create an Ecl bundle, see the ECL Bundle Writer's Guide (https://github.com/hpcc-systems/HPCC-Platform/blob/master/ecl/ecl-bundle/BUNDLES.rst).
