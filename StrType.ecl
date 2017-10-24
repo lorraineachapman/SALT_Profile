@@ -1,7 +1,6 @@
-EXPORT StrType := 
-#if (UnicodeCfg.UseUnicode)
-UNICODE
-#else
-STRING
-#end
+EXPORT StrType := #IF(UnicodeCfg.UseUnicode)
+  UNICODE
+#ELSE
+  STRING
+#END
 ;

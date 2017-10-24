@@ -3,4 +3,4 @@
 // So add on two bytes at your own peril!!!
 // Note also that SOME routines (particularly INGEST) assume this is a numeric
 // ALL assume that the ordering relations (>, >= etc) will work for it.
-export UIDType := UNSIGNED6;
+EXPORT UIDType := UNSIGNED6;
