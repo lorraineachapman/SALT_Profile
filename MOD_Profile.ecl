@@ -1,30 +1,28 @@
-/** Measure string similarity based upon ration of common trigrams to all trigrams
- *  found in the UNICODE argument strings.
- *  @param inFile              The dataset
- *  @param id_field            Field containing numeric Cluster ID
- *  @param src_field           Field containing Source ID
- *  @param CorrelateSampleSize Number of records to compare during field correlation computate
- *  @param out_prefix          Optional prefix for OUTPUT names
- *  @return                    No return value - this is a MODULE with several EXPORTs
- */
-EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000,out_prefix='') := FUNCTIONMACRO
+EXPORT MOD_Profile(inFile_raw,id_field='',src_field='',CorrelateSampleSize=100000000,out_prefix='',maxFieldCorr=50) := FUNCTIONMACRO
+  // This routine is often "first contact" with data, so let's not assume it's very tidy
+  inFile := DISTRIBUTE(inFile_raw,SKEW(0.1)) : GLOBAL;
+
   LOADXML('<xml/>');
   #EXPORTXML(inFileFields, RECORDOF(inFile));
-  
+
   #DECLARE(recLevel);         // Track the depth of the attribute within the record
+  #DECLARE(recName);          // Track the name of an embedded recstruct
+  #DECLARE(recFlat);          // Track the "flattened" name of an embedded recstruct (i.e. use an _ instead of a .)
   #DECLARE(fieldCount);       // How many fields we have processed
   #DECLARE(transformClauses); // ECL statements that will be used in a TRANSFORM
   #DECLARE(datasetRecords);   // ECL statements that will be used in a DATASET
-  #DECLARE(summaryFields);		// ECL defining fields for the summary TABLE
-  #DECLARE(fieldNames);				// ECL listing fieldnames within a CHOOSE
-  #DECLARE(fieldPop);					// ECL listing population fields within a CHOOSE
-  #DECLARE(fieldMax);					// ECL listing maxlength fields within a CHOOSE
-  #DECLARE(fieldAve);					// ECL listing avelength fields within a CHOOSE
-  #DECLARE(outCondition);			// ECL listing conditional outputs
-  
+  #DECLARE(summaryFields);	  // ECL defining fields for the summary TABLE
+  #DECLARE(fieldNames);		    // ECL listing fieldnames within a CHOOSE
+  #DECLARE(fieldPop);			    // ECL listing population fields within a CHOOSE
+  #DECLARE(fieldMax);			    // ECL listing maxlength fields within a CHOOSE
+  #DECLARE(fieldAve);			    // ECL listing avelength fields within a CHOOSE
+  #DECLARE(outCondition);		  // ECL listing conditional outputs
+
   // For each top-level attribute, build up ECL statements that will be
   // used in a TRANSFORM statement and a DATASET statement
   #SET(recLevel, 0);
+  #SET(recName, '');
+  #SET(recFlat, '');
   #SET(fieldCount, 0);
   #SET(transformClauses, '');
   #SET(datasetRecords, '');
@@ -36,11 +34,17 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
   #SET(outCondition, '');
   #FOR(inFileFields)
     #FOR(field)
-      #IF(%{@isRecord}% = 1 OR %{@isDataset}% = 1)
+      #IF(%{@isRecord}% = 1)
+        #SET(recLevel, %recLevel% + 1)
+        #SET(recName, %'@name'%+'.')
+        #SET(recFlat, %'@name'%+'_')
+      #ELSEIF(%{@isDataset}% = 1)
         #SET(recLevel, %recLevel% + 1)
       #ELSEIF(%{@isEnd}% = 1)
         #SET(recLevel, %recLevel% - 1)
-      #ELSEIF(%recLevel% = 0)
+        #SET(recName, '')
+        #SET(recFlat, '')
+      #ELSEIF(%recLevel% = 0 OR (%recLevel%=1 AND %'recName'%<>''))
         // This is a top-level attribute, so process it
         #IF(%fieldCount% > 0)
           #APPEND(transformClauses, ',')
@@ -51,19 +55,20 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
           #APPEND(fieldAve, ',')
         #END
         #SET(fieldCount, %fieldCount% + 1)
-        #APPEND(transformClauses, 'TRIM((SALT_Profile.StrType)le.' + %'@name'% + ')')
+        #APPEND(transformClauses, 'TRIM((SALT_Profile.StrType)le.' +%'recName'% + %'@name'% + ')')
         #APPEND(datasetRecords, '{' + %'fieldCount'% + ', \'' + %'@name'% + '\'}')
-        #APPEND(summaryFields, 'populated_'+%'@name'%+'_pcnt := AVE(GROUP,IF('+#TEXT(inFile)+'.'+%'@name'%+' = (TYPEOF('+#TEXT(inFile)+'.'+%'@name'%+'))\'\',0,100));')
-        #APPEND(summaryFields, 'maxlength_'+%'@name'%+' := MAX(GROUP,LENGTH(TRIM((SALT_Profile.StrType)'+#TEXT(inFile)+'.'+%'@name'%+')));')
-        #APPEND(summaryFields, 'avelength_'+%'@name'%+' := AVE(GROUP,LENGTH(TRIM((SALT_Profile.StrType)'+#TEXT(inFile)+'.'+%'@name'%+')),'+#TEXT(inFile)+'.'+%'@name'%+'<>(typeof('+#TEXT(inFile)+'.'+%'@name'%+'))\'\');')
-        #APPEND(fieldNames, '\'' + %'@name'% + '\'')
-        #APPEND(fieldPop, 'le.populated_'+%'@name'%+'_pcnt')
-        #APPEND(fieldMax, 'le.maxlength_'+%'@name'%)
-        #APPEND(fieldAve, 'le.avelength_'+%'@name'%)
+        #APPEND(summaryFields, 'populated_'+%'recFlat'%+%'@name'%+'_cnt := COUNT(GROUP,'+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+' != (TYPEOF('+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+'))\'\');')
+        #APPEND(summaryFields, 'populated_'+%'recFlat'%+%'@name'%+'_pcnt := AVE(GROUP,IF('+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+' = (TYPEOF('+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+'))\'\',0,100));')
+        #APPEND(summaryFields, 'maxlength_'+%'recFlat'%+%'@name'%+' := MAX(GROUP,LENGTH(TRIM((SALT_Profile.StrType)'+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+')));')
+        #APPEND(summaryFields, 'avelength_'+%'recFlat'%+%'@name'%+' := AVE(GROUP,LENGTH(TRIM((SALT_Profile.StrType)'+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+')),'+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+'<>(typeof('+#TEXT(inFile)+'.'+%'recName'%+%'@name'%+'))\'\');')
+        #APPEND(fieldNames, '\'' + %'recName'%+%'@name'% + '\'')
+        #APPEND(fieldPop, 'le.populated_'+%'recFlat'%+%'@name'%+'_pcnt')
+        #APPEND(fieldMax, 'le.maxlength_'+%'recFlat'%+%'@name'%)
+        #APPEND(fieldAve, 'le.avelength_'+%'recFlat'%+%'@name'%)
       #END
     #END
   #END
-  
+
   #UNIQUENAME(M)
   %M% := MODULE
     #IF(#TEXT(out_prefix)<>'')
@@ -71,7 +76,7 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
     #ELSE
       SHARED pfx := '';
     #END
-    
+
     // Field Summary
     SummaryLayout := RECORD
       #IF(#TEXT(src_field)<>'')
@@ -86,7 +91,7 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
       EXPORT Summary := TABLE(inFile,SummaryLayout);
     #END
     EXPORT out_Summary := OUTPUT(Summary,NAMED(pfx+'Summary'),ALL);
-    
+
     // Inverted Field Summary
     invRec := RECORD
       #IF(#TEXT(src_field)<>'')
@@ -111,8 +116,8 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
       SELF.avelength := CHOOSE(C,%fieldAve%);
     END;
     EXPORT invSummary := NORMALIZE(Summary, %fieldCount%, invert(LEFT,COUNTER));
-    EXPORT out_invSummary := OUTPUT(invSummary,NAMED(pfx+'invSummary'),ALL);
-    
+    EXPORT out_invSummary := OUTPUT(invSummary,NAMED(pfx+'InvertedSummary'),ALL);
+
     // Transform for converting the incoming data into a standard structure
     SALT_Profile.MAC_Character_Counts.X_Data_Layout Into(RECORDOF(inFile) le, UNSIGNED c) := TRANSFORM
       SELF.Fld := CHOOSE(c, %transformClauses%);
@@ -124,19 +129,19 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
         SELF.src := le.src_field;
       #END
     END;
-    
+
     // Apply the transform
     SHARED FldInv0 := NORMALIZE(inFile, %fieldCount%, Into(LEFT,COUNTER));
-    
+
     // Create a dataset enumerating the attributes in the incoming data
     SHARED FldIds := DATASET([%datasetRecords%], SALT_Profile.MAC_Character_Counts.Field_Identification);
-    
+
     // Profiling
     EXPORT AllProfiles := SALT_Profile.MAC_Character_Counts.FN_Profile(FldInv0, FldIds);
     EXPORT out_AllProfiles := OUTPUT(AllProfiles,NAMED(pfx+'AllProfiles'),ALL);
-    
-    
+
     // Field Correlations
+    SHARED okCorrelations := (%fieldCount% <= maxFieldCorr); // This section blows up for extreme #s of fields
     SALT_Profile.MAC_Correlate.Data_Layout IntoP(inFile le, UNSIGNED C) := TRANSFORM
       SELF.FldNo1 := 1 + (C / %fieldCount%);
       SELF.FldNo2 := 1 + (C % %fieldCount%);
@@ -144,9 +149,13 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
       SELF.Fld2 := TRIM(CHOOSE(SELF.FldNo2,%transformClauses%));
       END;
     Pairs0 := NORMALIZE(ENTH(inFile,CorrelateSampleSize),%fieldCount%*%fieldCount%,IntoP(LEFT,COUNTER))(FldNo1<FldNo2);
-    EXPORT Correlations := SALT_Profile.MAC_Correlate.Fn_Profile(Pairs0,FldIds);
-    EXPORT out_Correlations := OUTPUT(Correlations,NAMED(pfx+'Correlations'),ALL);
-  
+    Pairs00 := IF(okCorrelations, Pairs0, DATASET([],SALT_Profile.MAC_Correlate.Data_Layout));
+    EXPORT Correlations := SALT_Profile.MAC_Correlate.Fn_Profile(Pairs00,FldIds);
+    EXPORT out_Correlations := IF(okCorrelations,
+      OUTPUT(Correlations,NAMED(pfx+'Correlations'),ALL),
+      OUTPUT('Correlations suppressed: fieldCount='+#TEXT(%fieldCount%),NAMED(pfx+'Correlations'))
+    );
+
     // Cluster counts
     #IF(#TEXT(id_field)<>'')
       EXPORT ClusterCounts := SALT_Profile.MOD_ClusterStats.Counts(inFile,id_field);
@@ -160,18 +169,27 @@ EXPORT MOD_Profile(inFile,id_field='',src_field='',CorrelateSampleSize=100000000
         #APPEND(outCondition, ',out_ClusterSrc,out_SrcProfiles')
       #END
     #END
-    
+
+    // Optimized Layout
+    EXPORT optLayout := SALT_Profile.MAC_Character_Counts.EclRecord(AllProfiles,'Layout_Sample');
+    EXPORT out_optLayout := OUTPUT(optLayout,NAMED('OptimizedLayout'));
+
+    // Field Types
+    EXPORT Types := SALT_Profile.MAC_Character_Counts.FieldTypes(AllProfiles,99.9);
+    EXPORT out_Types := OUTPUT(Types,NAMED('Types'));
+
     // Outputs
     EXPORT out := PARALLEL(
-      out_Summary, 
-      out_invSummary, 
-      out_AllProfiles, 
-      out_Correlations
+      out_Summary
+      ,out_invSummary
+      ,out_AllProfiles
+      ,out_Correlations
       #IF(#TEXT(id_field)<>'')
         %outCondition%
       #END
+      ,out_optLayout
+      ,out_Types
     );
   END;
   RETURN %M%;
 ENDMACRO;
-  
